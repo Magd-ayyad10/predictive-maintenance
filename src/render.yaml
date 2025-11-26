@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: predictive-maintenance
+    env: python
+    plan: free
+    region: frankfurt
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: MODE
+        value: dashboard   # or "api"
