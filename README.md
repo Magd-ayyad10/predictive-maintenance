@@ -33,7 +33,7 @@
 
 ### - Advanced preprocessing
 
-### - Outlier removal
+### - Outliers removal
 
 ### - Feature engineering
 
