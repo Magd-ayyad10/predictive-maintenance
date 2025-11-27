@@ -218,7 +218,7 @@ LOG_FILE = 'prediction_logs.xlsx'
 
 
 # API Configuration
-API_URL = "http://127.0.0.1:8000/predict"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict")
 
 # Define column groups
 IDENTIFIER_COLS = ['UDI', 'Product ID']
@@ -367,7 +367,7 @@ def calculate_business_kpis(df: pd.DataFrame) -> dict:
         kpis['error'] = str(e)
         return kpis
 
-# --- Removed plot_machine_health_pie as requested ---
+
 
 def plot_failure_type_bars(df: pd.DataFrame):
     """
