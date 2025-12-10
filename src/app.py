@@ -218,7 +218,7 @@ LOG_FILE = 'prediction_logs.xlsx'
 
 
 # API Configuration
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict")
+API_URL = "http://127.0.0.1:8000/predict"
 
 # Define column groups
 IDENTIFIER_COLS = ['UDI', 'Product ID']
@@ -367,7 +367,7 @@ def calculate_business_kpis(df: pd.DataFrame) -> dict:
         kpis['error'] = str(e)
         return kpis
 
-
+# --- Removed plot_machine_health_pie as requested ---
 
 def plot_failure_type_bars(df: pd.DataFrame):
     """
@@ -1285,6 +1285,822 @@ def render_live_prediction_via_api():
                 st.error(f"Could not read log file: {e}")
         else:
             st.info("No predictions logged yet.")
+
+def render_ai_model_capabilities(df: pd.DataFrame, prod_models: dict, perf: dict):
+    """
+    Renders Page: AI Model Capabilities.
+    Showcases the AI model's architecture, performance, and capabilities.
+    """
+    st.title("🤖 AI Model Capabilities")
+    st.markdown("""
+    Explore the **predictive AI engine** powering this dashboard. This page provides
+    a comprehensive overview of the machine learning model, its performance, and its
+    ability to predict equipment failures before they occur.
+    """)
+    
+    if prod_models is None:
+        st.error("AI Model not loaded. Cannot display capabilities.")
+        return
+
+    # --- Section 1: Model Overview ---
+    st.header("📊 Model Overview")
+    
+    overview_cols = st.columns(2)
+    
+    with overview_cols[0]:
+        st.subheader("Model Architecture")
+        st.markdown("""
+        <div style="background-color: #ffffff; border-radius: 10px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+        <h4 style="color: #0c1e3a;">🗳️ Ensemble Voting Classifier</h4>
+        <p>This model uses an <strong>Ensemble Learning</strong> approach, combining multiple 
+        machine learning algorithms to achieve superior prediction accuracy.</p>
+        
+        <p><strong>Base Estimators:</strong></p>
+        <ul>
+            <li>🌲 <strong>Random Forest</strong> - Decision tree ensemble for robust predictions</li>
+            <li>🚀 <strong>XGBoost</strong> - Gradient boosting for high accuracy</li>
+            <li>💡 <strong>LightGBM</strong> - Fast gradient boosting framework</li>
+        </ul>
+        
+        <p><strong>Voting Strategy:</strong> Soft Voting (probability averaging)</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with overview_cols[1]:
+        st.subheader("Prediction Capabilities")
+        st.markdown("""
+        <div style="background-color: #ffffff; border-radius: 10px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+        <h4 style="color: #0c1e3a;">⚙️ What The Model Predicts</h4>
+        
+        <p><strong>Primary Task:</strong> Binary Classification</p>
+        <ul>
+            <li>✅ <strong>Class 0:</strong> Normal Operation - No failure expected</li>
+            <li>⚠️ <strong>Class 1:</strong> Failure Likely - Immediate attention required</li>
+        </ul>
+        
+        <p><strong>Input Features:</strong></p>
+        <ul>
+            <li>🌡️ Air Temperature [K]</li>
+            <li>🔥 Process Temperature [K]</li>
+            <li>🔄 Rotational Speed [rpm]</li>
+            <li>⚡ Torque [Nm]</li>
+            <li>🔧 Tool Wear [min]</li>
+            <li>🏭 Machine Type (L/M/H)</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # --- Section 2: Performance Metrics ---
+    st.header("📈 Model Performance Metrics")
+    
+    if perf is not None:
+        report_dict = perf['classification_report_dict']
+        f1 = report_dict['weighted avg']['f1-score']
+        precision = report_dict['weighted avg']['precision']
+        recall = report_dict['weighted avg']['recall']
+        auc_score = perf['pr_curve']['auc']
+        
+        # Performance KPIs
+        kpi_cols = st.columns(4)
+        with kpi_cols[0]:
+            st.metric(
+                "F1-Score", 
+                f"{f1:.2%}",
+                help="Harmonic mean of precision and recall. Higher is better."
+            )
+        with kpi_cols[1]:
+            st.metric(
+                "Precision", 
+                f"{precision:.2%}",
+                help="How many of the predicted failures were actually failures."
+            )
+        with kpi_cols[2]:
+            st.metric(
+                "Recall", 
+                f"{recall:.2%}",
+                help="How many actual failures were correctly identified."
+            )
+        with kpi_cols[3]:
+            st.metric(
+                "PR-AUC", 
+                f"{auc_score:.4f}",
+                help="Area under the Precision-Recall curve."
+            )
+        
+        st.markdown("")
+        
+        # Visuals
+        viz_col1, viz_col2 = st.columns(2)
+        
+        with viz_col1:
+            st.subheader("Confusion Matrix")
+            fig_cm = plot_confusion_matrix_plotly(
+                perf['confusion_matrix'], title="Model Prediction Accuracy"
+            )
+            st.plotly_chart(fig_cm, use_container_width=True)
+            st.caption("""
+            The confusion matrix shows how well the model distinguishes between 
+            normal operation and failure conditions. Diagonal values represent 
+            correct predictions.
+            """)
+        
+        with viz_col2:
+            st.subheader("Precision-Recall Curve")
+            fig_pr = plot_pr_curve_plotly(
+                perf['pr_curve']['precision'], perf['pr_curve']['recall'],
+                perf['pr_curve']['auc'], title="Precision vs Recall Trade-off"
+            )
+            st.plotly_chart(fig_pr, use_container_width=True)
+            st.caption("""
+            This curve shows the trade-off between precision (avoiding false alarms) 
+            and recall (catching all failures). A higher area under the curve 
+            indicates better overall performance.
+            """)
+    else:
+        st.warning("Performance metrics unavailable. Ensure the model and data are loaded correctly.")
+    
+    st.markdown("---")
+    
+    # --- Section 3: Feature Importance ---
+    st.header("🎯 Key Failure Drivers")
+    st.markdown("""
+    Understanding which factors most influence failure predictions helps maintenance 
+    teams focus their inspection efforts on the most critical parameters.
+    """)
+    
+    if perf is not None:
+        imp_col1, imp_col2 = st.columns([2, 1])
+        
+        with imp_col1:
+            fig_imp = plot_feature_importance_plotly(
+                perf['feature_importances'], title="Top 15 Most Important Features"
+            )
+            st.plotly_chart(fig_imp, use_container_width=True)
+        
+        with imp_col2:
+            st.subheader("Insights")
+            top_features = perf['feature_importances'].head(5)
+            st.markdown("**Top 5 Predictive Factors:**")
+            for idx, row in top_features.iterrows():
+                importance_pct = row['Importance'] * 100
+                st.markdown(f"- **{row['Feature']}**: {importance_pct:.1f}%")
+            
+            st.markdown("")
+            st.info("""
+            💡 **Interpretation:** Features with higher importance have a greater 
+            influence on the model's failure predictions. Monitor these parameters 
+            closely for early warning signs.
+            """)
+    
+    st.markdown("---")
+    
+    # --- Section 4: Model Capabilities Summary ---
+    st.header("✨ AI Capabilities Summary")
+    
+    cap_cols = st.columns(3)
+    
+    with cap_cols[0]:
+        st.markdown("""
+        <div style="background-color: #e8f4f8; border-radius: 10px; padding: 20px; text-align: center; height: 200px;">
+        <h3 style="color: #0068c9;">🔮 Predictive Analytics</h3>
+        <p>Forecasts machine failures <strong>before they occur</strong>, enabling 
+        proactive maintenance scheduling and reducing unplanned downtime.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with cap_cols[1]:
+        st.markdown("""
+        <div style="background-color: #f0f8e8; border-radius: 10px; padding: 20px; text-align: center; height: 200px;">
+        <h3 style="color: #28a745;">📊 Risk Stratification</h3>
+        <p>Categorizes machines into <strong>Critical, High, Medium, and Low</strong> 
+        risk tiers, helping prioritize maintenance resources effectively.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with cap_cols[2]:
+        st.markdown("""
+        <div style="background-color: #fff8e8; border-radius: 10px; padding: 20px; text-align: center; height: 200px;">
+        <h3 style="color: #fd7e14;">💰 Cost Optimization</h3>
+        <p>Reduces maintenance costs by <strong>preventing catastrophic failures</strong> 
+        and optimizing repair schedules based on predicted risk levels.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("")
+    
+    # --- Section 5: Technical Details (Expandable) ---
+    with st.expander("🔬 Technical Details & Classification Report"):
+        tech_col1, tech_col2 = st.columns(2)
+        
+        with tech_col1:
+            st.subheader("Training Information")
+            st.markdown(f"""
+            - **Dataset:** AI4I 2020 Predictive Maintenance
+            - **Total Samples:** {len(df) if df is not None else 'N/A':,}
+            - **Feature Count:** 6 (5 numerical + 1 categorical)
+            - **Target Variable:** Machine Failure (Binary)
+            - **Preprocessing:** StandardScaler + OneHotEncoder
+            - **Class Balancing:** SMOTE Oversampling
+            """)
+        
+        with tech_col2:
+            st.subheader("Model Configuration")
+            st.markdown("""
+            - **Algorithm:** Soft Voting Ensemble
+            - **Base Models:** RF, XGBoost, LightGBM
+            - **Cross-Validation:** Stratified K-Fold
+            - **Optimization:** Hyperparameter Tuning
+            - **Deployment:** Joblib Serialization
+            """)
+        
+        if perf is not None:
+            st.subheader("Full Classification Report")
+            st.code(perf['classification_report_str'])
+
+def render_advanced_analytics(df: pd.DataFrame, prod_models: dict, perf: dict):
+    """
+    Renders Page: Advanced Analytics.
+    Contains multiple advanced analytics tools in sub-tabs.
+    """
+    st.title("🔬 Advanced Analytics")
+    st.markdown("""
+    Explore advanced analytical tools for deeper insights into your machine fleet.
+    Use the tabs below to access different analytics capabilities.
+    """)
+    
+    if df is None:
+        st.error("Data not loaded. Cannot display analytics.")
+        return
+    
+    # Create sub-tabs for different analytics features
+    analytics_tabs = st.tabs([
+        "📊 Sensor Correlation",
+        "🔬 What-If Simulator",
+        "📈 Compare Machines",
+        "📅 Historical Trends",
+        "🔔 Alert Configuration"
+    ])
+    
+    # --- TAB 1: Sensor Correlation Heatmap ---
+    with analytics_tabs[0]:
+        st.header("📊 Sensor Correlation Analysis")
+        st.markdown("""
+        Understand how different sensor readings relate to each other and to machine failures.
+        Strong correlations can reveal hidden patterns and help identify early warning signs.
+        """)
+        
+        # Calculate correlation matrix
+        correlation_cols = NUMERICAL_COLS + [TARGET_COL]
+        corr_df = df[correlation_cols].corr()
+        
+        # Create heatmap
+        fig_corr = px.imshow(
+            corr_df,
+            labels=dict(x="Feature", y="Feature", color="Correlation"),
+            x=correlation_cols,
+            y=correlation_cols,
+            color_continuous_scale='RdBu_r',
+            zmin=-1, zmax=1,
+            text_auto='.2f',
+            title="Sensor Correlation Heatmap"
+        )
+        fig_corr.update_layout(
+            height=500,
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+        st.plotly_chart(fig_corr, use_container_width=True)
+        
+        # Correlation insights
+        st.subheader("🔍 Key Insights")
+        
+        # Find strongest correlations with failure
+        failure_corr = corr_df[TARGET_COL].drop(TARGET_COL).sort_values(key=abs, ascending=False)
+        
+        insight_cols = st.columns(2)
+        with insight_cols[0]:
+            st.markdown("**Strongest Correlations with Machine Failure:**")
+            for feature, corr_val in failure_corr.head(3).items():
+                direction = "↑" if corr_val > 0 else "↓"
+                color = "red" if corr_val > 0 else "blue"
+                st.markdown(f"- **{feature}**: {corr_val:.3f} {direction}")
+        
+        with insight_cols[1]:
+            st.markdown("**Interpretation:**")
+            st.info("""
+            - **Positive correlation**: Higher values → more failures
+            - **Negative correlation**: Higher values → fewer failures
+            - Values close to 0 indicate weak relationships
+            """)
+        
+        # Scatter plot for selected features
+        st.subheader("📈 Feature Relationship Explorer")
+        scatter_cols = st.columns(2)
+        with scatter_cols[0]:
+            x_feature = st.selectbox("X-Axis Feature", NUMERICAL_COLS, index=0, key="corr_x")
+        with scatter_cols[1]:
+            y_feature = st.selectbox("Y-Axis Feature", NUMERICAL_COLS, index=1, key="corr_y")
+        
+        fig_scatter = px.scatter(
+            df, x=x_feature, y=y_feature,
+            color=df[TARGET_COL].map({0: 'Normal', 1: 'Failure'}),
+            color_discrete_map={'Normal': '#28a745', 'Failure': '#dc3545'},
+            opacity=0.6,
+            title=f"{x_feature} vs {y_feature}"
+        )
+        fig_scatter.update_layout(height=400)
+        st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    # --- TAB 2: What-If Scenario Simulator ---
+    with analytics_tabs[1]:
+        st.header("🔬 What-If Scenario Simulator")
+        st.markdown("""
+        Simulate different operating conditions to see how changes affect failure probability.
+        Adjust multiple parameters and observe the impact on machine health predictions.
+        """)
+        
+        if prod_models is None:
+            st.error("Model not loaded. Cannot run simulations.")
+        else:
+            model = prod_models['model']
+            preprocessor = prod_models['preprocessor']
+            
+            # Baseline values
+            st.subheader("⚙️ Set Baseline Parameters")
+            
+            base_cols = st.columns(3)
+            with base_cols[0]:
+                base_air_temp = st.slider(
+                    "Air Temperature [K]",
+                    float(df['Air temperature [K]'].min()),
+                    float(df['Air temperature [K]'].max()),
+                    float(df['Air temperature [K]'].mean()),
+                    key="whatif_air"
+                )
+                base_process_temp = st.slider(
+                    "Process Temperature [K]",
+                    float(df['Process temperature [K]'].min()),
+                    float(df['Process temperature [K]'].max()),
+                    float(df['Process temperature [K]'].mean()),
+                    key="whatif_process"
+                )
+            
+            with base_cols[1]:
+                base_rot_speed = st.slider(
+                    "Rotational Speed [rpm]",
+                    int(df['Rotational speed [rpm]'].min()),
+                    int(df['Rotational speed [rpm]'].max()),
+                    int(df['Rotational speed [rpm]'].mean()),
+                    key="whatif_rpm"
+                )
+                base_torque = st.slider(
+                    "Torque [Nm]",
+                    float(df['Torque [Nm]'].min()),
+                    float(df['Torque [Nm]'].max()),
+                    float(df['Torque [Nm]'].mean()),
+                    key="whatif_torque"
+                )
+            
+            with base_cols[2]:
+                base_tool_wear = st.slider(
+                    "Tool Wear [min]",
+                    int(df['Tool wear [min]'].min()),
+                    int(df['Tool wear [min]'].max()),
+                    int(df['Tool wear [min]'].mean()),
+                    key="whatif_wear"
+                )
+                base_type = st.selectbox(
+                    "Machine Type",
+                    df['Type'].unique(),
+                    key="whatif_type"
+                )
+            
+            # Calculate baseline probability
+            if st.button("🚀 Run Sensitivity Analysis", key="run_whatif"):
+                with st.spinner("Running simulations..."):
+                    base_input = {
+                        'Air temperature [K]': base_air_temp,
+                        'Process temperature [K]': base_process_temp,
+                        'Rotational speed [rpm]': base_rot_speed,
+                        'Torque [Nm]': base_torque,
+                        'Tool wear [min]': base_tool_wear,
+                        'Type': base_type
+                    }
+                    
+                    # Get feature order from preprocessor
+                    cat_features = preprocessor.named_transformers_['cat'].feature_names_in_
+                    num_features = preprocessor.named_transformers_['num'].feature_names_in_
+                    
+                    # Base prediction
+                    base_df = pd.DataFrame([base_input])
+                    base_ordered = base_df[list(num_features) + list(cat_features)]
+                    base_prob = model.predict_proba(preprocessor.transform(base_ordered))[0][1]
+                    
+                    st.metric("📊 Baseline Failure Probability", f"{base_prob*100:.2f}%")
+                    
+                    # Sensitivity analysis - vary each feature
+                    st.subheader("📈 Sensitivity Analysis")
+                    st.markdown("Shows how changing each parameter affects failure probability:")
+                    
+                    sensitivity_results = []
+                    
+                    for feature in NUMERICAL_COLS:
+                        # Create variations: -20%, -10%, base, +10%, +20%
+                        variations = [-0.2, -0.1, 0, 0.1, 0.2]
+                        probs = []
+                        
+                        for var in variations:
+                            test_input = base_input.copy()
+                            test_input[feature] = base_input[feature] * (1 + var)
+                            test_df = pd.DataFrame([test_input])
+                            test_ordered = test_df[list(num_features) + list(cat_features)]
+                            prob = model.predict_proba(preprocessor.transform(test_ordered))[0][1]
+                            probs.append(prob)
+                            sensitivity_results.append({
+                                'Feature': feature,
+                                'Variation': f"{var*100:+.0f}%",
+                                'Probability': prob
+                            })
+                    
+                    # Create sensitivity chart
+                    sens_df = pd.DataFrame(sensitivity_results)
+                    fig_sens = px.line(
+                        sens_df, x='Variation', y='Probability', color='Feature',
+                        markers=True, title="Feature Sensitivity Analysis"
+                    )
+                    fig_sens.add_hline(y=0.5, line_dash="dash", line_color="red",
+                                       annotation_text="Failure Threshold")
+                    fig_sens.update_layout(height=400, yaxis_tickformat='.0%')
+                    st.plotly_chart(fig_sens, use_container_width=True)
+    
+    # --- TAB 3: Comparative Machine Analysis ---
+    with analytics_tabs[2]:
+        st.header("📈 Comparative Machine Analysis")
+        st.markdown("""
+        Compare sensor readings and performance metrics across multiple machines side-by-side.
+        """)
+        
+        # Machine selection
+        all_machines = df['Product ID'].unique()
+        
+        compare_cols = st.columns(3)
+        with compare_cols[0]:
+            machine_1 = st.selectbox("Machine 1", all_machines, index=0, key="cmp_m1")
+        with compare_cols[1]:
+            machine_2 = st.selectbox("Machine 2", all_machines, index=min(1, len(all_machines)-1), key="cmp_m2")
+        with compare_cols[2]:
+            machine_3 = st.selectbox("Machine 3 (Optional)", ["None"] + list(all_machines), index=0, key="cmp_m3")
+        
+        selected_machines = [machine_1, machine_2]
+        if machine_3 != "None":
+            selected_machines.append(machine_3)
+        
+        # Filter data for selected machines
+        compare_df = df[df['Product ID'].isin(selected_machines)]
+        
+        # Summary statistics comparison
+        st.subheader("📊 Summary Statistics Comparison")
+        
+        summary_data = []
+        for machine in selected_machines:
+            machine_data = df[df['Product ID'] == machine]
+            summary_data.append({
+                'Machine': machine,
+                'Data Points': len(machine_data),
+                'Failures': machine_data[TARGET_COL].sum(),
+                'Avg Torque': f"{machine_data['Torque [Nm]'].mean():.1f}",
+                'Avg Tool Wear': f"{machine_data['Tool wear [min]'].mean():.0f}",
+                'Avg Temp': f"{machine_data['Process temperature [K]'].mean():.1f}",
+                'Max RPM': f"{machine_data['Rotational speed [rpm]'].max():.0f}"
+            })
+        
+        summary_df = pd.DataFrame(summary_data)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        
+        # Sensor comparison chart
+        st.subheader("📈 Sensor Reading Comparison")
+        
+        sensor_to_compare = st.selectbox(
+            "Select Sensor to Compare", NUMERICAL_COLS, key="cmp_sensor"
+        )
+        
+        fig_compare = px.box(
+            compare_df, x='Product ID', y=sensor_to_compare,
+            color='Product ID', title=f"{sensor_to_compare} Distribution by Machine"
+        )
+        fig_compare.update_layout(height=400, showlegend=False)
+        st.plotly_chart(fig_compare, use_container_width=True)
+        
+        # Radar chart comparison
+        st.subheader("🎯 Multi-Sensor Radar Comparison")
+        
+        # Normalize values for radar chart
+        radar_data = []
+        for machine in selected_machines:
+            machine_data = df[df['Product ID'] == machine]
+            radar_data.append({
+                'Machine': machine,
+                'Air Temp (norm)': (machine_data['Air temperature [K]'].mean() - df['Air temperature [K]'].min()) / 
+                                   (df['Air temperature [K]'].max() - df['Air temperature [K]'].min()),
+                'Process Temp (norm)': (machine_data['Process temperature [K]'].mean() - df['Process temperature [K]'].min()) / 
+                                        (df['Process temperature [K]'].max() - df['Process temperature [K]'].min()),
+                'RPM (norm)': (machine_data['Rotational speed [rpm]'].mean() - df['Rotational speed [rpm]'].min()) / 
+                              (df['Rotational speed [rpm]'].max() - df['Rotational speed [rpm]'].min()),
+                'Torque (norm)': (machine_data['Torque [Nm]'].mean() - df['Torque [Nm]'].min()) / 
+                                 (df['Torque [Nm]'].max() - df['Torque [Nm]'].min()),
+                'Tool Wear (norm)': (machine_data['Tool wear [min]'].mean() - df['Tool wear [min]'].min()) / 
+                                    (df['Tool wear [min]'].max() - df['Tool wear [min]'].min())
+            })
+        
+        categories = ['Air Temp (norm)', 'Process Temp (norm)', 'RPM (norm)', 'Torque (norm)', 'Tool Wear (norm)']
+        
+        fig_radar = go.Figure()
+        colors = ['#0068c9', '#28a745', '#fd7e14']
+        
+        for i, machine_info in enumerate(radar_data):
+            values = [machine_info[cat] for cat in categories]
+            values.append(values[0])  # Close the radar
+            
+            fig_radar.add_trace(go.Scatterpolar(
+                r=values,
+                theta=categories + [categories[0]],
+                fill='toself',
+                name=machine_info['Machine'],
+                line_color=colors[i % len(colors)],
+                opacity=0.6
+            ))
+        
+        fig_radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            title="Normalized Sensor Comparison",
+            height=450
+        )
+        st.plotly_chart(fig_radar, use_container_width=True)
+    
+    # --- TAB 4: Historical Trends ---
+    with analytics_tabs[3]:
+        st.header("📅 Historical Trends & Patterns")
+        st.markdown("""
+        Analyze failure patterns over time to identify seasonal trends and degradation patterns.
+        """)
+        
+        if 'event_timestamp' in df.columns:
+            df_time = df.copy()
+            df_time['Month'] = df_time['event_timestamp'].dt.to_period('M').astype(str)
+            df_time['Week'] = df_time['event_timestamp'].dt.to_period('W').astype(str)
+            df_time['Day'] = df_time['event_timestamp'].dt.date
+            df_time['Hour'] = df_time['event_timestamp'].dt.hour
+            
+            # Failure trend over time
+            st.subheader("📈 Failure Trend Over Time")
+            
+            time_granularity = st.radio(
+                "Time Granularity", ["Daily", "Weekly", "Monthly"],
+                horizontal=True, key="trend_granularity"
+            )
+            
+            if time_granularity == "Daily":
+                trend_df = df_time.groupby('Day').agg({
+                    TARGET_COL: 'sum',
+                    'UDI': 'count'
+                }).reset_index()
+                trend_df.columns = ['Date', 'Failures', 'Total Events']
+                x_col = 'Date'
+            elif time_granularity == "Weekly":
+                trend_df = df_time.groupby('Week').agg({
+                    TARGET_COL: 'sum',
+                    'UDI': 'count'
+                }).reset_index()
+                trend_df.columns = ['Week', 'Failures', 'Total Events']
+                x_col = 'Week'
+            else:
+                trend_df = df_time.groupby('Month').agg({
+                    TARGET_COL: 'sum',
+                    'UDI': 'count'
+                }).reset_index()
+                trend_df.columns = ['Month', 'Failures', 'Total Events']
+                x_col = 'Month'
+            
+            trend_df['Failure Rate'] = trend_df['Failures'] / trend_df['Total Events'] * 100
+            
+            fig_trend = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            fig_trend.add_trace(
+                go.Bar(x=trend_df[x_col], y=trend_df['Failures'], name="Failures", marker_color='#dc3545'),
+                secondary_y=False
+            )
+            fig_trend.add_trace(
+                go.Scatter(x=trend_df[x_col], y=trend_df['Failure Rate'], name="Failure Rate %",
+                          line=dict(color='#0068c9', width=2), mode='lines+markers'),
+                secondary_y=True
+            )
+            
+            fig_trend.update_layout(title=f"Failures Over Time ({time_granularity})", height=400)
+            fig_trend.update_yaxes(title_text="Number of Failures", secondary_y=False)
+            fig_trend.update_yaxes(title_text="Failure Rate (%)", secondary_y=True)
+            
+            st.plotly_chart(fig_trend, use_container_width=True)
+            
+            # Hourly pattern (if applicable)
+            st.subheader("⏰ Failure Pattern by Hour of Day")
+            hourly_failures = df_time[df_time[TARGET_COL] == 1].groupby('Hour').size().reset_index(name='Failures')
+            
+            fig_hourly = px.bar(
+                hourly_failures, x='Hour', y='Failures',
+                title="Failures by Hour of Day",
+                color='Failures', color_continuous_scale='Reds'
+            )
+            fig_hourly.update_layout(height=350)
+            st.plotly_chart(fig_hourly, use_container_width=True)
+            
+            # Failure type distribution over time
+            st.subheader("🔧 Failure Types Over Time")
+            
+            failure_time_df = df_time[df_time[TARGET_COL] == 1].groupby('Month')[FAILURE_FLAGS].sum().reset_index()
+            failure_melted = failure_time_df.melt(id_vars=['Month'], var_name='Failure Type', value_name='Count')
+            
+            fig_failure_time = px.area(
+                failure_melted, x='Month', y='Count', color='Failure Type',
+                title="Failure Types Distribution Over Time"
+            )
+            fig_failure_time.update_layout(height=400)
+            st.plotly_chart(fig_failure_time, use_container_width=True)
+            
+        else:
+            st.warning("Timestamp data not available for historical trend analysis.")
+            st.info("Using index-based analysis instead.")
+            
+            # Fallback: Use index for trends
+            window_size = st.slider("Rolling Window Size", 10, 100, 50, key="rolling_window")
+            
+            df_indexed = df.copy()
+            df_indexed['Rolling Failure Rate'] = df_indexed[TARGET_COL].rolling(window=window_size).mean() * 100
+            
+            fig_rolling = px.line(
+                df_indexed, x='Time Index', y='Rolling Failure Rate',
+                title=f"Rolling Failure Rate (Window: {window_size})"
+            )
+            fig_rolling.update_layout(height=400)
+            st.plotly_chart(fig_rolling, use_container_width=True)
+    
+    # --- TAB 5: Alert Configuration ---
+    with analytics_tabs[4]:
+        st.header("🔔 Alert Configuration")
+        st.markdown("""
+        Configure threshold-based alerts for proactive monitoring.
+        When sensor values exceed these thresholds, machines should be flagged for inspection.
+        """)
+        
+        # Alert thresholds configuration
+        st.subheader("⚙️ Set Alert Thresholds")
+        
+        threshold_cols = st.columns(2)
+        
+        with threshold_cols[0]:
+            st.markdown("**Temperature Alerts**")
+            air_temp_threshold = st.slider(
+                "Air Temperature Warning [K]",
+                float(df['Air temperature [K]'].min()),
+                float(df['Air temperature [K]'].max()),
+                float(df['Air temperature [K]'].quantile(0.9)),
+                key="alert_air_temp"
+            )
+            process_temp_threshold = st.slider(
+                "Process Temperature Warning [K]",
+                float(df['Process temperature [K]'].min()),
+                float(df['Process temperature [K]'].max()),
+                float(df['Process temperature [K]'].quantile(0.9)),
+                key="alert_process_temp"
+            )
+        
+        with threshold_cols[1]:
+            st.markdown("**Operational Alerts**")
+            torque_threshold = st.slider(
+                "Torque Warning [Nm]",
+                float(df['Torque [Nm]'].min()),
+                float(df['Torque [Nm]'].max()),
+                float(df['Torque [Nm]'].quantile(0.9)),
+                key="alert_torque"
+            )
+            tool_wear_threshold = st.slider(
+                "Tool Wear Warning [min]",
+                int(df['Tool wear [min]'].min()),
+                int(df['Tool wear [min]'].max()),
+                int(df['Tool wear [min]'].quantile(0.9)),
+                key="alert_wear"
+            )
+        
+        # Probability threshold
+        st.markdown("**AI Model Alert**")
+        prob_threshold = st.slider(
+            "Failure Probability Alert Threshold",
+            0.0, 1.0, 0.5, 0.05,
+            help="Machines with failure probability above this will be flagged",
+            key="alert_prob"
+        )
+        
+        st.markdown("---")
+        
+        # Apply thresholds and show current alerts
+        st.subheader("🚨 Current Alert Status")
+        
+        if st.button("🔄 Refresh Alert Status", key="refresh_alerts"):
+            with st.spinner("Checking thresholds..."):
+                # Get latest readings
+                sort_col = 'event_timestamp' if 'event_timestamp' in df.columns else 'Time Index'
+                latest = df.loc[df.groupby('Product ID')[sort_col].idxmax()].copy()
+                
+                # Check thresholds
+                latest['Air Temp Alert'] = latest['Air temperature [K]'] > air_temp_threshold
+                latest['Process Temp Alert'] = latest['Process temperature [K]'] > process_temp_threshold
+                latest['Torque Alert'] = latest['Torque [Nm]'] > torque_threshold
+                latest['Tool Wear Alert'] = latest['Tool wear [min]'] > tool_wear_threshold
+                
+                # Calculate failure probability if model available
+                if prod_models is not None:
+                    preprocessor = prod_models['preprocessor']
+                    model = prod_models['model']
+                    cat_features = preprocessor.named_transformers_['cat'].feature_names_in_
+                    num_features = preprocessor.named_transformers_['num'].feature_names_in_
+                    X_ordered = latest[list(num_features) + list(cat_features)]
+                    probs = model.predict_proba(preprocessor.transform(X_ordered))[:, 1]
+                    latest['Failure Probability'] = probs
+                    latest['AI Alert'] = latest['Failure Probability'] > prob_threshold
+                else:
+                    latest['Failure Probability'] = 0
+                    latest['AI Alert'] = False
+                
+                # Count alerts
+                latest['Alert Count'] = (
+                    latest['Air Temp Alert'].astype(int) +
+                    latest['Process Temp Alert'].astype(int) +
+                    latest['Torque Alert'].astype(int) +
+                    latest['Tool Wear Alert'].astype(int) +
+                    latest['AI Alert'].astype(int)
+                )
+                
+                # Display summary
+                alert_summary = st.columns(4)
+                with alert_summary[0]:
+                    total_alerts = (latest['Alert Count'] > 0).sum()
+                    st.metric("🚨 Machines with Alerts", total_alerts)
+                with alert_summary[1]:
+                    critical = (latest['Alert Count'] >= 3).sum()
+                    st.metric("🔴 Critical (3+ alerts)", critical)
+                with alert_summary[2]:
+                    warning = ((latest['Alert Count'] >= 1) & (latest['Alert Count'] < 3)).sum()
+                    st.metric("🟡 Warning (1-2 alerts)", warning)
+                with alert_summary[3]:
+                    ok = (latest['Alert Count'] == 0).sum()
+                    st.metric("🟢 OK (No alerts)", ok)
+                
+                # Show detailed alert table
+                if total_alerts > 0:
+                    st.subheader("📋 Detailed Alert List")
+                    alert_machines = latest[latest['Alert Count'] > 0].sort_values('Alert Count', ascending=False)
+                    
+                    display_cols = [
+                        'Product ID', 'Type', 'Alert Count',
+                        'Air Temp Alert', 'Process Temp Alert',
+                        'Torque Alert', 'Tool Wear Alert', 'AI Alert'
+                    ]
+                    if 'Failure Probability' in alert_machines.columns:
+                        display_cols.insert(3, 'Failure Probability')
+                    
+                    st.dataframe(
+                        alert_machines[display_cols].head(20),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.success("✅ All machines are operating within normal thresholds!")
+        
+        # Export alert configuration
+        st.markdown("---")
+        st.subheader("💾 Export Alert Configuration")
+        
+        alert_config = {
+            'Air Temperature Threshold [K]': air_temp_threshold,
+            'Process Temperature Threshold [K]': process_temp_threshold,
+            'Torque Threshold [Nm]': torque_threshold,
+            'Tool Wear Threshold [min]': tool_wear_threshold,
+            'Failure Probability Threshold': prob_threshold
+        }
+        
+        config_df = pd.DataFrame([alert_config])
+        st.dataframe(config_df, use_container_width=True, hide_index=True)
+        
+        st.download_button(
+            label="📥 Download Alert Config (CSV)",
+            data=config_df.to_csv(index=False),
+            file_name="alert_configuration.csv",
+            mime="text/csv",
+            key="download_alert_config"
+        )
+
 # ------------------------------------------------------------------------------
 # 6. MAIN APPLICATION LOGIC
 # ------------------------------------------------------------------------------
@@ -1301,11 +2117,11 @@ def main():
     # --- Page Options ---
     page_options = {
         "Executive Summary": "SUMMARY",
-        "Maintenance Priority List": "PRIORITY", # <-- "WOW" FEATURE
+        "Maintenance Priority List": "PRIORITY",
         "Machine Deep Dive": "MACHINE",
-        #"Model Performance": "PERFORMANCE",
+        "AI Model Capabilities": "AI_MODEL",
+        "Advanced Analytics": "ANALYTICS",  # <-- NEW TAB
         "Live Prediction": "PREDICT",
-        #"Data Explorer & Reports": "DATA"
     }
     
     selected_page_title = st.sidebar.radio(
@@ -1372,6 +2188,12 @@ def main():
     #elif selected_page_title == "Live Prediction":
         #render_live_prediction(prod_models, raw_df)
 
+    elif selected_page_title == "AI Model Capabilities":
+        render_ai_model_capabilities(raw_df, prod_models, perf)
+    
+    elif selected_page_title == "Advanced Analytics":
+        render_advanced_analytics(raw_df, prod_models, perf)
+        
     elif selected_page_title == "Live Prediction":
         render_live_prediction_via_api()
         
